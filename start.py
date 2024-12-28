@@ -1,4 +1,5 @@
 import pygame
+import math
 
 # Инициализация Pygame
 pygame.init()
@@ -13,11 +14,13 @@ WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 RED = (255, 0, 0)
 GRAY = (200, 200, 200)
-ORANGE = (255, 165, 0)
 BLUE = (0, 0, 255)
+DARK_RED = (200, 0, 0)
+GREEN = (0, 255, 0)
 
 # Шрифт
 FONT = pygame.font.Font(None, 36)
+SMALL_FONT = pygame.font.Font(None, 24)
 
 # Уровень
 level = 1
@@ -33,6 +36,17 @@ player_speed = 5
 # Пули
 bullets = []
 bullet_speed = 10
+bullet_count = 16
+MAX_BULLETS = 16
+
+# Загрузка текстуры пули
+bullet_image = pygame.image.load("images/bullet.png")
+bullet_image = pygame.transform.scale(bullet_image, (40, 20))
+
+# Загрузка звуков
+shoot_sound = pygame.mixer.Sound("sounds/shoot.mp3")
+reload_sound = pygame.mixer.Sound("sounds/reload.mp3")
+release_sound = pygame.mixer.Sound("sounds/release.mp3")
 
 # Размер карты
 MAP_WIDTH, MAP_HEIGHT = 1600, 1200
@@ -48,44 +62,33 @@ def draw_scene(surface, offset):
 
     pygame.draw.rect(surface, RED, (SCENE_X - offset[0], SCENE_Y - offset[1], SCENE_WIDTH, SCENE_HEIGHT), 3)
 
-# Функция рисования миникарты
+# Функция рисования круглой миникарты
 def draw_minimap(surface, player_pos):
-    minimap_width, minimap_height = 200, 150
-    minimap_x, minimap_y = WIDTH - minimap_width - 10, 10
-    pygame.draw.rect(surface, WHITE, (minimap_x, minimap_y, minimap_width, minimap_height))
+    minimap_radius = 75
+    minimap_center = (WIDTH - minimap_radius - 20, minimap_radius + 20)
+    pygame.draw.circle(surface, WHITE, minimap_center, minimap_radius)
+    pygame.draw.circle(surface, RED, minimap_center, minimap_radius, 2)
 
-    # Пропорции миникарты относительно красной зоны
-    scale_x = minimap_width / SCENE_WIDTH
-    scale_y = minimap_height / SCENE_HEIGHT
-
-    # Рисование зоны сцены
-    scene_rect = pygame.Rect(
-        minimap_x,
-        minimap_y,
-        minimap_width,
-        minimap_height
-    )
-    pygame.draw.rect(surface, RED, scene_rect, 2)
-
-    # Рисование игрока на миникарте
-    player_marker = pygame.Rect(
-        minimap_x + (player_pos[0] - SCENE_X) * scale_x - player_width * scale_x // 2,
-        minimap_y + (player_pos[1] - SCENE_Y) * scale_y - player_height * scale_y // 2,
-        player_width * scale_x,
-        player_height * scale_y
-    )
-    pygame.draw.rect(surface, BLACK, player_marker)
+    pygame.draw.circle(surface, GREEN, minimap_center, 5)
 
 # Функция стрельбы
 def shoot_bullet(start_pos, direction):
-    bullets.append({
-        "pos": list(start_pos),
-        "dir": direction
-    })
+    global bullet_count
+    if bullet_count > 0:
+        bullets.append({
+            "pos": list(start_pos),
+            "dir": direction,
+            "angle": direction.angle_to(pygame.math.Vector2(1, 0))
+        })
+        shoot_sound.play()
+        bullet_count -= 1
+    else:
+        release_sound.play()
 
 # Основной игровой цикл
 clock = pygame.time.Clock()
 running = True
+show_reload_toast = False
 while running:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
@@ -95,7 +98,14 @@ while running:
             world_x = mouse_x + camera_offset[0]
             world_y = mouse_y + camera_offset[1]
             direction = pygame.math.Vector2(world_x - player_pos[0], world_y - player_pos[1]).normalize()
-            shoot_bullet(player_pos, direction)
+            distance = math.hypot(world_x - player_pos[0], world_y - player_pos[1])
+            if distance > player_width // 2:
+                shoot_bullet(player_pos, direction)
+        elif event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_r:
+                bullet_count = MAX_BULLETS
+                reload_sound.play()
+                show_reload_toast = False
 
     # Управление игроком
     keys = pygame.key.get_pressed()
@@ -129,19 +139,31 @@ while running:
     draw_scene(SCREEN, camera_offset)
 
     # Отрисовка игрока
-    pygame.draw.rect(SCREEN, BLACK, (player_pos[0] - player_width // 2 - camera_offset[0],
+    pygame.draw.rect(SCREEN, GREEN, (player_pos[0] - player_width // 2 - camera_offset[0],
                                      player_pos[1] - player_height // 2 - camera_offset[1],
                                      player_width, player_height))
 
     # Отрисовка пуль
     for bullet in bullets:
-        pygame.draw.rect(SCREEN, ORANGE, (bullet["pos"][0] - camera_offset[0],
-                                          bullet["pos"][1] - camera_offset[1],
-                                          10, 5))
+        rotated_bullet = pygame.transform.rotate(bullet_image, -bullet["angle"])
+        bullet_rect = rotated_bullet.get_rect(center=(bullet["pos"][0] - camera_offset[0], bullet["pos"][1] - camera_offset[1]))
+        SCREEN.blit(rotated_bullet, bullet_rect)
 
     # Отображение уровня
     level_text = FONT.render(f"Level: {level}", True, BLACK)
     SCREEN.blit(level_text, (10, 10))
+
+    # Отображение количества пуль
+    bullet_color = RED if bullet_count < 3 else BLACK
+    bullet_count_text = FONT.render(f"Bullets: {bullet_count}", True, bullet_color)
+    SCREEN.blit(bullet_count_text, (10, 50))
+
+    # Показать сообщение о перезарядке
+    if bullet_count == 0:
+        show_reload_toast = True
+    if show_reload_toast:
+        reload_text = SMALL_FONT.render("Press R to reload", True, DARK_RED)
+        SCREEN.blit(reload_text, (WIDTH // 2 - reload_text.get_width() // 2, HEIGHT - 30))
 
     # Отрисовка миникарты
     draw_minimap(SCREEN, player_pos)
