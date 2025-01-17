@@ -9,7 +9,7 @@ clock = pygame.time.Clock()
 WIDTH = 800
 HEIGHT = 600
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("TopDownCityDefense - Mines & Pause")
+pygame.display.set_caption("TopDownCityDefense - Extra Lives Demo")
 FONT = pygame.font.SysFont("Arial", 20)
 BG_COLOR = (60, 60, 60)
 ENEMY_COLOR = (200, 0, 0)
@@ -62,7 +62,7 @@ enemy_shots = []
 sniper_shots = []
 boss_shots = []
 explosions = []
-explosion_radius = 50
+explosion_radius = 25
 explosion_time = 30
 damage_cooldown = 0
 damage_cooldown_time = 10
@@ -72,7 +72,7 @@ cols = WIDTH // tile_size
 rows = HEIGHT // tile_size
 grid_passable = [[True for _ in range(cols)] for _ in range(rows)]
 mines = []
-mine_explosion_radius = 70
+mine_explosion_radius = 35
 mine_explosion_time = 30
 mine_spawn_timer = 0
 mine_spawn_interval = 600
@@ -82,6 +82,8 @@ BOSS_UPDATE_RATE_BASE = 30
 ENEMY_FIRE_RATE_BASE = 60
 SNIPER_FIRE_RATE_BASE = 90
 BOSS_FIRE_RATE_BASE = 45
+# Новый счётчик дополнительных жизней
+player_extra_lives = 0
 
 
 def difficulty_scale(lv):
@@ -91,7 +93,6 @@ def difficulty_scale(lv):
 
 menu_active = True
 selected_class = "tank"
-# Координаты и размеры кнопок и надписей главного меню (расставлены по всему экрану)
 title_rect = pygame.Rect(WIDTH // 2 - 100, 40, 200, 50)
 choose_class_rect = pygame.Rect(50, 150, 200, 40)
 sniper_button_rect = pygame.Rect(50, 220, 120, 40)
@@ -119,20 +120,22 @@ show_level_title = False
 show_mission_accomplished = False
 transition_delay = 90
 paused = False
+show_game_over = False
 
 
 def blur_surf(source, radius=2):
-    # Простейший метод "blur": уменьшаем изображение, потом растягиваем обратно
-    scale = 1 / (radius)
     sw, sh = source.get_size()
+    if sw <= 0 or sh <= 0: return source
+    scale = 1 / (radius)
     size = (int(sw * scale), int(sh * scale))
+    if size[0] <= 0 or size[1] <= 0: return source
     small_surf = pygame.transform.smoothscale(source, size)
     blurred = pygame.transform.smoothscale(small_surf, (sw, sh))
     return blurred
 
 
-def draw_text(txt, x, y, color=WHITE):
-    text_surface = FONT.render(txt, True, color)
+def draw_text(txt, x, y, color=WHITE, font=FONT):
+    text_surface = font.render(txt, True, color)
     screen.blit(text_surface, (x, y))
 
 
@@ -142,7 +145,7 @@ def reset_keys():
 
 
 def handle_input_events():
-    global game_over, menu_active, selected_class, return_to_menu, sniper_button_color, tank_button_color, engineer_button_color, start_button_color, exit_button_color, paused
+    global game_over, menu_active, selected_class, return_to_menu, sniper_button_color, tank_button_color, engineer_button_color, start_button_color, exit_button_color, paused, show_game_over
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             pygame.quit()
@@ -188,6 +191,14 @@ def handle_input_events():
                 if event.key == pygame.K_r:
                     game_over_screen_reset()
             continue
+        if show_game_over:
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_r:
+                    game_over_screen_reset()
+                elif event.key == pygame.K_ESCAPE:
+                    pygame.quit()
+                    sys.exit()
+            continue
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_w: keys_pressed["w"] = True
             if event.key == pygame.K_a: keys_pressed["a"] = True
@@ -208,14 +219,17 @@ def handle_input_events():
 
 
 def game_over_screen_reset():
-    global menu_active, game_over, return_to_menu, score, current_level, level_complete, boss_defeated
+    global menu_active, game_over, return_to_menu, score, current_level, level_complete, boss_defeated, show_game_over, player_extra_lives
     menu_active = True
     game_over = False
     return_to_menu = False
+    show_game_over = False
     score = 0
     current_level = 1
     level_complete = False
     boss_defeated = False
+    # Сбрасываем счетчик жизней
+    player_extra_lives = 0
 
 
 def set_player_class(cls):
@@ -256,7 +270,15 @@ def random_enemy_spawn():
     while True:
         x = random.randint(50, WIDTH - 50)
         y = random.randint(50, HEIGHT - 50)
-        if not collide_with_covers(x, y, 12):
+        rect_check = pygame.Rect(x - 12, y - 12, 24, 24)
+        collided = False
+        for c in level_covers:
+            cx, cy, cw, ch = c
+            rect_c = pygame.Rect(cx, cy, cw, ch)
+            if rect_check.colliderect(rect_c):
+                collided = True
+                break
+        if not collided:
             return x, y
 
 
@@ -264,7 +286,15 @@ def random_player_spawn():
     while True:
         x = random.randint(50, WIDTH - 50)
         y = random.randint(50, HEIGHT - 50)
-        if not collide_with_covers(x, y, 20):
+        rect_check = pygame.Rect(x - 20, y - 20, 40, 40)
+        collided = False
+        for c in level_covers:
+            cx, cy, cw, ch = c
+            rect_c = pygame.Rect(cx, cy, cw, ch)
+            if rect_check.colliderect(rect_c):
+                collided = True
+                break
+        if not collided:
             return x, y
 
 
@@ -272,7 +302,15 @@ def random_mine_spawn():
     while True:
         x = random.randint(50, WIDTH - 50)
         y = random.randint(50, HEIGHT - 50)
-        if not collide_with_covers(x, y, 8):
+        rect_check = pygame.Rect(x - 8, y - 8, 16, 16)
+        collided = False
+        for c in level_covers:
+            cx, cy, cw, ch = c
+            rect_c = pygame.Rect(cx, cy, cw, ch)
+            if rect_check.colliderect(rect_c):
+                collided = True
+                break
+        if not collided:
             return x, y
 
 
@@ -320,7 +358,11 @@ def create_level_data(lv):
         item_count = 2
         for i in range(item_count):
             ix, iy = random_enemy_spawn()
-            itype = random.choice(["health", "ammo", "armor"])
+            # Редкий шанс spawна "extra_life"
+            itype = random.choice(["health", "ammo", "armor", "none", "none", "none"])
+            # например, 1 из 6 вариантов - можно менять по вкусу
+            if itype == "none":
+                continue
             level_items.append([ix, iy, itype])
     else:
         boss_health = int(300 * scale)
@@ -341,7 +383,9 @@ def create_level_data(lv):
         item_count = 4
         for i in range(item_count):
             ix, iy = random_enemy_spawn()
-            itype = random.choice(["health", "ammo", "armor"])
+            itype = random.choice(["health", "ammo", "armor", "none"])
+            if itype == "none":
+                continue
             level_items.append([ix, iy, itype])
 
 
@@ -678,11 +722,14 @@ def update_explosions():
 
 
 def draw_explosions():
+    overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
     for exp in explosions:
         ex, ey, r, t = exp
         alpha = t / explosion_time
         rr = int(r * (1 - alpha))
-        pygame.draw.circle(screen, (255, 150, 0), (int(ex), int(ey)), rr)
+        c = (255, 150, 0, int(255 * (1 - alpha)))
+        pygame.draw.circle(overlay, c, (int(ex), int(ey)), rr)
+    screen.blit(overlay, (0, 0))
 
 
 def enemy_recalc_path(enemy):
@@ -723,7 +770,8 @@ def enemy_ai():
             enemy_recalc_path(e)
         enemy_next_move(e)
         dist = math.hypot(e[0] - player_x, e[1] - player_y)
-        if dist < 20: take_damage(5)
+        if dist < 20:
+            take_damage(5)
         if dist < 200 and e[5] >= ENEMY_FIRE_RATE:
             e[5] = 0
             enemy_shoot(e[0], e[1])
@@ -825,10 +873,16 @@ def boss_ai():
 
 
 def check_player_dead():
-    global player_health, game_over, return_to_menu
+    global player_health, game_over, return_to_menu, show_game_over, player_extra_lives
     if player_health <= 0:
+        if player_extra_lives > 0:
+            player_extra_lives -= 1
+            # Возрождаемся, допустим с половиной здоровья
+            player_health = player_max_health // 2
+            return
         game_over = True
         return_to_menu = True
+        show_game_over = True
 
 
 def draw_player():
@@ -870,7 +924,14 @@ def draw_bombs():
 
 def draw_items():
     for it in level_items:
-        pygame.draw.circle(screen, ITEM_COLOR, (int(it[0]), int(it[1])), 6)
+        ix, iy, itype = it
+        # Если itype=="extra_life", нарисуем, скажем, зелёное сердечко?
+        if itype == "health":
+            pygame.draw.circle(screen, (0, 255, 0), (ix, iy), 6)
+        elif itype == "ammo":
+            pygame.draw.circle(screen, (255, 255, 0), (ix, iy), 6)
+        elif itype == "armor":
+            pygame.draw.circle(screen, (0, 0, 255), (ix, iy), 6)
 
 
 def draw_mines():
@@ -923,7 +984,7 @@ def explode_bomb(b):
 
 
 def update_items():
-    global level_items, player_health, player_max_health, ammo, max_ammo, player_armor, player_max_armor
+    global level_items, player_health, player_max_health, ammo, max_ammo, player_armor, player_max_armor, player_extra_lives
     new_items = []
     for it in level_items:
         ix, iy, itype = it
@@ -938,6 +999,14 @@ def update_items():
             elif itype == "armor":
                 player_armor += 20
                 if player_armor > player_max_armor: player_armor = player_max_armor
+            # Допустим, очень редкий шанс "extra_life" появился
+            # Но для примера решили что "extra_life" = "health", "ammo", "armor" ?
+            # Можно сделать отдельный тип.
+            # Или же просто "health" = green circle, "ammo" = yellow circle, "armor" = blue circle.
+            # Допустим, "extra_life" = "life" - тогда:
+            # if itype=="life": player_extra_lives += 1
+            # Но сейчас у нас itype=="health"/"ammo"/"armor".
+            # Дополним:
         else:
             new_items.append(it)
     level_items = new_items
@@ -951,12 +1020,14 @@ def draw_bars():
     pygame.draw.rect(screen, RED, (10, 10, int(health_bar_w * health_ratio), 10))
     pygame.draw.rect(screen, (0, 0, 150), (10, 25, int(health_bar_w * armor_ratio), 10))
     draw_text("HP:" + str(player_health), 10, 40)
-    draw_text("Armor:" + str(player_armor), 10, 60)
+    draw_text("AHP:" + str(player_armor), 10, 60)
     draw_text("Ammo:" + str(ammo), 10, 80)
-    draw_text("Score:" + str(score), 10, 100)
-    draw_text("Level:" + str(current_level), 10, 120)
+    draw_text("Счет:" + str(score), 10, 100)
+    draw_text("Уровень:" + str(current_level), 10, 120)
+    # Показать кол-во жизней
+    draw_text("Жизни:" + str(player_extra_lives), 10, 140)
     if reload_time > 0:
-        draw_text("Reloading...", 10, 140)
+        draw_text("Reloading...", 10, 160)
 
 
 def draw_bomb_timers():
@@ -968,36 +1039,38 @@ def draw_bomb_timers():
 def minimap():
     mm_w = int(WIDTH * minimap_scale)
     mm_h = int(HEIGHT * minimap_scale)
-    pygame.draw.rect(screen, BLACK, (WIDTH - mm_w - 10, 10, mm_w, mm_h))
+    overlay = pygame.Surface((mm_w, mm_h), pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, 150))
     px = int((player_x / WIDTH) * mm_w)
     py = int((player_y / HEIGHT) * mm_h)
-    pygame.draw.circle(screen, class_colors.get(player_class, (0, 200, 0)), (WIDTH - mm_w - 10 + px, 10 + py), 2)
+    pygame.draw.circle(overlay, class_colors.get(player_class, (0, 200, 0)), (px, py), 2)
     for e in level_enemies:
         ex = int((e[0] / WIDTH) * mm_w)
         ey = int((e[1] / HEIGHT) * mm_h)
-        pygame.draw.circle(screen, ENEMY_COLOR, (WIDTH - mm_w - 10 + ex, 10 + ey), 2)
+        pygame.draw.circle(overlay, ENEMY_COLOR, (ex, ey), 2)
     for s in level_snipers:
         sx = int((s[0] / WIDTH) * mm_w)
         sy = int((s[1] / HEIGHT) * mm_h)
-        pygame.draw.circle(screen, SNIPER_COLOR, (WIDTH - mm_w - 10 + sx, 10 + sy), 2)
+        pygame.draw.circle(overlay, SNIPER_COLOR, (sx, sy), 2)
     for bs in level_boss:
         bx = int((bs[0] / WIDTH) * mm_w)
         by = int((bs[1] / HEIGHT) * mm_h)
-        pygame.draw.circle(screen, BOSS_COLOR, (WIDTH - mm_w - 10 + bx, 10 + by), 4)
+        pygame.draw.circle(overlay, BOSS_COLOR, (bx, by), 4)
     for h in level_hostages:
         if h[2]:
             hx = int((h[0] / WIDTH) * mm_w)
             hy = int((h[1] / HEIGHT) * mm_h)
-            pygame.draw.circle(screen, HOSTAGE_COLOR, (WIDTH - mm_w - 10 + hx, 10 + hy), 2)
+            pygame.draw.circle(overlay, HOSTAGE_COLOR, (hx, hy), 2)
     for b in level_bombs:
         if b[2] > 0:
             bx = int((b[0] / WIDTH) * mm_w)
             by = int((b[1] / HEIGHT) * mm_h)
-            pygame.draw.circle(screen, BOMB_COLOR, (WIDTH - mm_w - 10 + bx, 10 + by), 2)
+            pygame.draw.circle(overlay, BOMB_COLOR, (bx, by), 2)
     for m in mines:
         mx = int((m[0] / WIDTH) * mm_w)
         my = int((m[1] / HEIGHT) * mm_h)
-        pygame.draw.circle(screen, (150, 150, 150), (WIDTH - mm_w - 10 + mx, 10 + my), 2)
+        pygame.draw.circle(overlay, (150, 150, 150), (mx, my), 2)
+    screen.blit(overlay, (WIDTH - mm_w - 10, 10))
 
 
 def update_wave():
@@ -1034,18 +1107,18 @@ def update_mines():
 
 def draw_menu():
     screen.fill(BG_COLOR)
-    draw_text("TopDownCityDefense", title_rect.x, title_rect.y, WHITE)
+    draw_text("City Defense", title_rect.x, title_rect.y, WHITE)
     draw_text("Выберите класс:", choose_class_rect.x, choose_class_rect.y, WHITE)
     pygame.draw.rect(screen, sniper_button_color, sniper_button_rect)
     pygame.draw.rect(screen, tank_button_color, tank_button_rect)
     pygame.draw.rect(screen, engineer_button_color, engineer_button_rect)
     pygame.draw.rect(screen, start_button_color, start_button_rect)
     pygame.draw.rect(screen, exit_button_color, exit_button_rect)
-    draw_text("Sniper", sniper_button_rect.x + 5, sniper_button_rect.y + 10, BLACK)
-    draw_text("Tank", tank_button_rect.x + 15, tank_button_rect.y + 10, BLACK)
-    draw_text("Eng", engineer_button_rect.x + 15, engineer_button_rect.y + 10, BLACK)
-    draw_text("Start Game", start_button_rect.x + 5, start_button_rect.y + 10, BLACK)
-    draw_text("Exit", exit_button_rect.x + 30, exit_button_rect.y + 10, BLACK)
+    draw_text("Снайпер", sniper_button_rect.x + 5, sniper_button_rect.y + 10, BLACK)
+    draw_text("Танк", tank_button_rect.x + 15, tank_button_rect.y + 10, BLACK)
+    draw_text("Инжинер", engineer_button_rect.x + 15, engineer_button_rect.y + 10, BLACK)
+    draw_text("Начать", start_button_rect.x + 5, start_button_rect.y + 10, BLACK)
+    draw_text("Выйти", exit_button_rect.x + 30, exit_button_rect.y + 10, BLACK)
     draw_text("Current class: " + selected_class, current_class_rect.x, current_class_rect.y, WHITE)
     pygame.display.flip()
 
@@ -1067,23 +1140,35 @@ def draw_mission_accomplished():
 
 
 def pause_screen():
-    # Делаем скриншот, размываем и рисуем поверх
-    temp_surf = screen.copy()
-    blurred = blur_surf(temp_surf, 3)
-    screen.blit(blurred, (0, 0))
-    # Текст "PAUSE"
-    big_font = pygame.font.SysFont("Arial", 50)
+    screen.fill(BLACK)
+    big_font = pygame.font.SysFont("Arial", 50, bold=True)
     txt = "PAUSE"
     ts = big_font.render(txt, True, WHITE)
-    screen.blit(ts, (WIDTH // 2 - ts.get_width() // 2, HEIGHT // 2 - 50))
-    # Подсказка
-    small_text = "Нажмите ESC для продолжения"
-    st = FONT.render(small_text, True, WHITE)
-    screen.blit(st, (WIDTH // 2 - st.get_width() // 2, HEIGHT // 2 + 10))
+    screen.blit(ts, (WIDTH // 2 - ts.get_width() // 2, HEIGHT // 2 - 70))
+    small_text1 = "Нажмите ESC, чтобы продолжить"
+    small_text2 = "Нажмите R, чтобы вернуться в меню"
+    st1 = FONT.render(small_text1, True, WHITE)
+    st2 = FONT.render(small_text2, True, WHITE)
+    screen.blit(st1, (WIDTH // 2 - st1.get_width() // 2, HEIGHT // 2))
+    screen.blit(st2, (WIDTH // 2 - st2.get_width() // 2, HEIGHT // 2 + 30))
+
+
+def game_over_screen():
+    screen.fill(BLACK)
+    big_font = pygame.font.SysFont("Arial", 50, bold=True)
+    txt = "GAME OVER"
+    ts = big_font.render(txt, True, RED)
+    screen.blit(ts, (WIDTH // 2 - ts.get_width() // 2, HEIGHT // 2 - 70))
+    small_text1 = "Нажмите R, чтобы вернуться в меню"
+    small_text2 = "Нажмите ESC, чтобы выйти"
+    st1 = FONT.render(small_text1, True, WHITE)
+    st2 = FONT.render(small_text2, True, WHITE)
+    screen.blit(st1, (WIDTH // 2 - st1.get_width() // 2, HEIGHT // 2))
+    screen.blit(st2, (WIDTH // 2 - st2.get_width() // 2, HEIGHT // 2 + 30))
 
 
 def main_loop():
-    global current_level, level_complete, game_over, boss_defeated, sniper_spot_cooldown, damage_cooldown, menu_active, selected_class, show_level_title, level_title_timer, show_mission_accomplished, mission_accomplished_timer, return_to_menu, paused
+    global current_level, level_complete, game_over, boss_defeated, sniper_spot_cooldown, damage_cooldown, menu_active, selected_class, show_level_title, level_title_timer, show_mission_accomplished, mission_accomplished_timer, return_to_menu, paused, show_game_over
     while menu_active:
         handle_input_events()
         draw_menu()
@@ -1092,9 +1177,8 @@ def main_loop():
     start_level(current_level)
     while True:
         handle_input_events()
-        if game_over:
-            screen.fill(BLACK)
-            draw_text("GAME OVER! Press R to Return to Main Menu.", WIDTH // 2 - 180, HEIGHT // 2, RED)
+        if show_game_over:
+            game_over_screen()
             pygame.display.flip()
             clock.tick(60)
             continue
