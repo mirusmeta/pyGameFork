@@ -6,6 +6,8 @@ from collections import deque
 
 pygame.init()
 clock = pygame.time.Clock()
+ammo_texture = pygame.transform.scale(pygame.image.load('images/box_2.png'), (28, 28))
+mine_texture = pygame.transform.scale(pygame.image.load('images/box_1.png'), (28, 28))
 WIDTH = 800
 HEIGHT = 600
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
@@ -458,6 +460,7 @@ def bfs_pathfind(startx, starty, endgx, endgy):
         path.append(cur)
         cur = parent[cur]
     path.append((sx, sy))
+
     path.reverse()
     return path
 
@@ -925,19 +928,24 @@ def draw_bombs():
 def draw_items():
     for it in level_items:
         ix, iy, itype = it
-        # Если itype=="extra_life", нарисуем, скажем, зелёное сердечко?
-        if itype == "health":
-            pygame.draw.circle(screen, (0, 255, 0), (ix, iy), 6)
+        if itype=="extra_life":
+            pygame.draw.circle(screen, (0, 0, 255), (ix, iy), 5)
+        elif itype == "health":
+            texture_rect = ammo_texture.get_rect(center=(ix, iy))
+            screen.blit(ammo_texture, texture_rect)
         elif itype == "ammo":
-            pygame.draw.circle(screen, (255, 255, 0), (ix, iy), 6)
+            texture_rect = ammo_texture.get_rect(center=(ix, iy))
+            screen.blit(ammo_texture, texture_rect)
         elif itype == "armor":
-            pygame.draw.circle(screen, (0, 0, 255), (ix, iy), 6)
+            texture_rect = ammo_texture.get_rect(center=(ix, iy))
+            screen.blit(ammo_texture, texture_rect)
 
 
 def draw_mines():
     for m in mines:
         mx, my = m
-        pygame.draw.circle(screen, (150, 150, 150), (int(mx), int(my)), 8)
+        texture_rect = mine_texture.get_rect(center=(mx, my))
+        screen.blit(mine_texture, texture_rect)
 
 
 def draw_bullet_lists():
