@@ -7,7 +7,9 @@ from collections import deque
 pygame.init()
 clock = pygame.time.Clock()
 ammo_texture = pygame.transform.scale(pygame.image.load('images/box_2.png'), (28, 28))
-mine_texture = pygame.transform.scale(pygame.image.load('images/box_1.png'), (28, 28))
+mine_texture = pygame.transform.scale(pygame.image.load('images/mina.png'), (28, 28))
+bandage_texture = pygame.transform.scale(pygame.image.load('images/bandage.png'), (30, 30))
+
 WIDTH = 800
 HEIGHT = 600
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
@@ -931,8 +933,8 @@ def draw_items():
         if itype=="extra_life":
             pygame.draw.circle(screen, (0, 0, 255), (ix, iy), 5)
         elif itype == "health":
-            texture_rect = ammo_texture.get_rect(center=(ix, iy))
-            screen.blit(ammo_texture, texture_rect)
+            texture_rect = bandage_texture.get_rect(center=(ix, iy))
+            screen.blit(bandage_texture, texture_rect)
         elif itype == "ammo":
             texture_rect = ammo_texture.get_rect(center=(ix, iy))
             screen.blit(ammo_texture, texture_rect)
