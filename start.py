@@ -6,9 +6,13 @@ from collections import deque
 
 pygame.init()
 clock = pygame.time.Clock()
-ammo_texture = pygame.transform.scale(pygame.image.load('images/box_2.png'), (28, 28))
-mine_texture = pygame.transform.scale(pygame.image.load('images/mina.png'), (28, 28))
-bandage_texture = pygame.transform.scale(pygame.image.load('images/bandage.png'), (30, 30))
+SIZE_DEFAULT = (28, 28)
+#Раняя инацилиазиация текстур, чтобы потом в коде этим не заниматься и чтобы игра не лагала.
+ammo_texture = pygame.transform.scale(pygame.image.load('images/box_2.png'), SIZE_DEFAULT)
+mine_texture = pygame.transform.scale(pygame.image.load('images/mina.png'), SIZE_DEFAULT)
+bandage_texture = pygame.transform.scale(pygame.image.load('images/bandage.png'), SIZE_DEFAULT)
+armor_texture = pygame.transform.scale(pygame.image.load('images/armor.png'), SIZE_DEFAULT)
+bullets_texture = pygame.transform.scale(pygame.image.load('images/patron.png'), SIZE_DEFAULT)
 
 WIDTH = 800
 HEIGHT = 600
@@ -924,7 +928,7 @@ def draw_hostages():
 def draw_bombs():
     for b in level_bombs:
         if b[2] > 0:
-            pygame.draw.circle(screen, BOMB_COLOR, (int(b[0]), int(b[1])), 6)
+            pygame.draw.circle(screen, BOMB_COLOR, (int(b[0]), int(b[1])), 8)
 
 
 def draw_items():
@@ -937,10 +941,10 @@ def draw_items():
             screen.blit(bandage_texture, texture_rect)
         elif itype == "ammo":
             texture_rect = ammo_texture.get_rect(center=(ix, iy))
-            screen.blit(ammo_texture, texture_rect)
+            screen.blit(bullets_texture, texture_rect)
         elif itype == "armor":
             texture_rect = ammo_texture.get_rect(center=(ix, iy))
-            screen.blit(ammo_texture, texture_rect)
+            screen.blit(armor_texture, texture_rect)
 
 
 def draw_mines():
@@ -1037,7 +1041,9 @@ def draw_bars():
     # Показать кол-во жизней
     draw_text("Жизни:" + str(player_extra_lives), 10, 140)
     if reload_time > 0:
-        draw_text("Reloading...", 10, 160)
+        draw_text("Перезарядка...", 10, 160)
+        reload_effect = pygame.mixer.Sound("sounds/reload.wav")
+        reload_effect.play()
 
 
 def draw_bomb_timers():
