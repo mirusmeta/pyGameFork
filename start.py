@@ -1,3 +1,6 @@
+import threading
+import time
+
 import pygame
 import sys
 import random
@@ -6,20 +9,33 @@ from collections import deque
 
 pygame.init()
 clock = pygame.time.Clock()
+
+# --- Загрузка ресурсов и глобальные настройки ---
 SIZE_DEFAULT = (28, 28)
-#Раняя инацилиазиация текстур, чтобы потом в коде этим не заниматься и чтобы игра не лагала.
-ammo_texture = pygame.transform.scale(pygame.image.load('images/box_2.png'), SIZE_DEFAULT)
+ammo_texture = pygame.transform.scale(pygame.image.load('images/patron.png'), SIZE_DEFAULT)
 mine_texture = pygame.transform.scale(pygame.image.load('images/mina.png'), SIZE_DEFAULT)
 bandage_texture = pygame.transform.scale(pygame.image.load('images/bandage.png'), SIZE_DEFAULT)
 armor_texture = pygame.transform.scale(pygame.image.load('images/armor.png'), SIZE_DEFAULT)
-bullets_texture = pygame.transform.scale(pygame.image.load('images/patron.png'), SIZE_DEFAULT)
+
+cover_texture_raw = pygame.image.load('images/box_3.png')
+health_texture = pygame.transform.scale(bandage_texture, SIZE_DEFAULT)
+cover_texture = None
+
+# Звуки (будущая доработка: можно добавить звук выстрела через pygame.mixer.Sound("...").play())
+shoot_sound = pygame.mixer.Sound("sounds/shoot.mp3")
+reload_sound = pygame.mixer.Sound("sounds/reload.wav")
+release_sound = pygame.mixer.Sound("sounds/release.mp3")
+explosion_sound = pygame.mixer.Sound("sounds/explosion.wav")
+
 
 WIDTH = 800
 HEIGHT = 600
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("TopDownCityDefense - Extra Lives Demo")
+pygame.display.set_caption("TopDownCityDefense - Updated Version")
 FONT = pygame.font.SysFont("Arial", 20)
-BG_COLOR = (60, 60, 60)
+
+# Цвета и константы
+BG_COLOR = (30, 30, 50)
 ENEMY_COLOR = (200, 0, 0)
 SNIPER_COLOR = (255, 0, 255)
 BOSS_COLOR = (255, 165, 0)
@@ -31,8 +47,10 @@ WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 RED = (255, 0, 0)
 LEVEL_COUNT = 20
+
 player_class = "tank"
 class_colors = {"sniper": (255, 255, 0), "tank": (0, 200, 0), "engineer": (0, 255, 255)}
+
 player_x = 400
 player_y = 300
 player_speed = 3
@@ -42,16 +60,20 @@ ammo = 30
 max_ammo = 30
 reload_time = 0
 reload_delay = 90
+shoot_cooldown = 0
+shoot_cooldown_max = 30
 score = 0
 current_level = 1
 game_over = False
+
 level_enemies = []
 level_snipers = []
 level_boss = []
-level_covers = []
+level_covers = []  # теперь генерируются до спавна противников
 level_hostages = []
 level_bombs = []
 level_items = []
+
 player_armor = 0
 player_max_armor = 50
 player_inventory = []
@@ -65,6 +87,7 @@ boss_defeated = False
 boss_health = 300
 boss_max_health = 300
 minimap_scale = 0.2
+
 shots_fired = []
 enemy_shots = []
 sniper_shots = []
@@ -74,41 +97,40 @@ explosion_radius = 25
 explosion_time = 30
 damage_cooldown = 0
 damage_cooldown_time = 10
+
 keys_pressed = {"w": False, "a": False, "s": False, "d": False, "r": False}
+
 tile_size = 40
 cols = WIDTH // tile_size
 rows = HEIGHT // tile_size
 grid_passable = [[True for _ in range(cols)] for _ in range(rows)]
+
 mines = []
-mine_explosion_radius = 35
+mine_explosion_radius = 50  #радиус взрыва мины
 mine_explosion_time = 30
 mine_spawn_timer = 0
 mine_spawn_interval = 600
+
 ENEMY_UPDATE_RATE_BASE = 30
 SNIPER_UPDATE_RATE_BASE = 30
 BOSS_UPDATE_RATE_BASE = 30
 ENEMY_FIRE_RATE_BASE = 60
 SNIPER_FIRE_RATE_BASE = 90
 BOSS_FIRE_RATE_BASE = 45
-# Новый счётчик дополнительных жизней
+
 player_extra_lives = 0
-
-
-def difficulty_scale(lv):
-    scale = 1 + 0.1 * (lv - 1)
-    return scale if scale < 3 else 3
-
 
 menu_active = True
 selected_class = "tank"
-title_rect = pygame.Rect(WIDTH // 2 - 100, 40, 200, 50)
-choose_class_rect = pygame.Rect(50, 150, 200, 40)
-sniper_button_rect = pygame.Rect(50, 220, 120, 40)
-tank_button_rect = pygame.Rect(50, 280, 120, 40)
-engineer_button_rect = pygame.Rect(50, 340, 120, 40)
-start_button_rect = pygame.Rect(WIDTH - 180, HEIGHT // 2 - 30, 120, 40)
-exit_button_rect = pygame.Rect(WIDTH - 180, HEIGHT // 2 + 40, 120, 40)
-current_class_rect = pygame.Rect(50, 400, 200, 40)
+# Переработанные координаты и размеры кнопок главного меню
+title_rect = pygame.Rect(WIDTH // 2 - 150, 50, 300, 60)
+sniper_button_rect = pygame.Rect(WIDTH // 2 - 250, 150, 150, 50)
+tank_button_rect = pygame.Rect(WIDTH // 2 - 75, 150, 150, 50)
+engineer_button_rect = pygame.Rect(WIDTH // 2 + 100, 150, 150, 50)
+start_button_rect = pygame.Rect(WIDTH // 2 - 150, HEIGHT - 150, 120, 50)
+exit_button_rect = pygame.Rect(WIDTH // 2 + 30, HEIGHT - 150, 120, 50)
+current_class_rect = pygame.Rect(WIDTH // 2 - 75, 220, 150, 40)
+
 sniper_button_color = (200, 200, 200)
 tank_button_color = (200, 200, 200)
 engineer_button_color = (200, 200, 200)
@@ -116,6 +138,10 @@ start_button_color = (200, 200, 200)
 exit_button_color = (200, 200, 200)
 hover_color = (255, 255, 150)
 return_to_menu = False
+
+# Новая переменная для перехода в меню (из паузы)
+restart_game = False
+
 ENEMY_UPDATE_RATE = ENEMY_UPDATE_RATE_BASE
 SNIPER_UPDATE_RATE = SNIPER_UPDATE_RATE_BASE
 BOSS_UPDATE_RATE = BOSS_UPDATE_RATE_BASE
@@ -130,21 +156,25 @@ transition_delay = 90
 paused = False
 show_game_over = False
 
+# Для инженера: количество мин, которые можно установить за игру (максимум 3)
+engineer_mines_left = 0
 
-def blur_surf(source, radius=2):
-    sw, sh = source.get_size()
-    if sw <= 0 or sh <= 0: return source
-    scale = 1 / (radius)
-    size = (int(sw * scale), int(sh * scale))
-    if size[0] <= 0 or size[1] <= 0: return source
-    small_surf = pygame.transform.smoothscale(source, size)
-    blurred = pygame.transform.smoothscale(small_surf, (sw, sh))
-    return blurred
+
+# --- Функции базовой логики и отрисовки ---
+
+def difficulty_scale(lv):
+    n = 1 + 0.1 * (lv - 1)
+    return n if n < 3 else 3
+
+
+def load_cover_texture():
+    global cover_texture, cover_texture_raw
+    cover_texture = cover_texture_raw
 
 
 def draw_text(txt, x, y, color=WHITE, font=FONT):
-    text_surface = font.render(txt, True, color)
-    screen.blit(text_surface, (x, y))
+    ts = font.render(txt, True, color)
+    screen.blit(ts, (x, y))
 
 
 def reset_keys():
@@ -152,12 +182,19 @@ def reset_keys():
         keys_pressed[k] = False
 
 
+# --- Обработка событий ---
 def handle_input_events():
-    global game_over, menu_active, selected_class, return_to_menu, sniper_button_color, tank_button_color, engineer_button_color, start_button_color, exit_button_color, paused, show_game_over
+    global game_over, menu_active, selected_class, return_to_menu, sniper_button_color, tank_button_color, engineer_button_color, start_button_color, exit_button_color, paused, show_game_over, engineer_mines_left, restart_game
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             pygame.quit()
             sys.exit()
+        # Если игра на паузе – проверяем возможность возврата в главное меню
+        if paused:
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_r:
+                    restart_game = True
+                    return
         if menu_active:
             mx, my = pygame.mouse.get_pos()
             if sniper_button_rect.collidepoint(mx, my):
@@ -215,6 +252,11 @@ def handle_input_events():
             if event.key == pygame.K_r: keys_pressed["r"] = True
             if event.key == pygame.K_ESCAPE:
                 paused = not paused
+            # Если выбран класс "инженер" – клавиша M устанавливает мину
+            if event.key == pygame.K_e and player_class == "engineer" and engineer_mines_left > 0:
+                mines.append([player_x, player_y])
+                engineer_mines_left -= 1
+                # (Будущая доработка: добавить звук установки мины)
         if event.type == pygame.KEYUP:
             if event.key == pygame.K_w: keys_pressed["w"] = False
             if event.key == pygame.K_a: keys_pressed["a"] = False
@@ -227,7 +269,7 @@ def handle_input_events():
 
 
 def game_over_screen_reset():
-    global menu_active, game_over, return_to_menu, score, current_level, level_complete, boss_defeated, show_game_over, player_extra_lives
+    global menu_active, game_over, return_to_menu, score, current_level, level_complete, boss_defeated, show_game_over, player_extra_lives, engineer_mines_left, restart_game, paused
     menu_active = True
     game_over = False
     return_to_menu = False
@@ -236,12 +278,14 @@ def game_over_screen_reset():
     current_level = 1
     level_complete = False
     boss_defeated = False
-    # Сбрасываем счетчик жизней
     player_extra_lives = 0
+    engineer_mines_left = 0
+    restart_game = False
+    paused = False
 
 
 def set_player_class(cls):
-    global player_class, player_health, player_max_health, player_armor, player_max_armor
+    global player_class, player_health, player_max_health, player_armor, player_max_armor, engineer_mines_left
     player_class = cls
     if cls == "sniper":
         player_max_health = 80
@@ -258,12 +302,14 @@ def set_player_class(cls):
         player_health = 100
         player_max_armor = 50
         player_armor = 50
+        engineer_mines_left = 3
 
 
 def reload_weapon():
     global ammo, reload_time
     if ammo < max_ammo and reload_time <= 0:
         reload_time = reload_delay
+        reload_sound.play()
 
 
 def update_reload():
@@ -274,123 +320,112 @@ def update_reload():
             ammo = max_ammo
 
 
-def random_enemy_spawn():
-    while True:
-        x = random.randint(50, WIDTH - 50)
-        y = random.randint(50, HEIGHT - 50)
-        rect_check = pygame.Rect(x - 12, y - 12, 24, 24)
-        collided = False
-        for c in level_covers:
-            cx, cy, cw, ch = c
-            rect_c = pygame.Rect(cx, cy, cw, ch)
-            if rect_check.colliderect(rect_c):
-                collided = True
-                break
-        if not collided:
-            return x, y
-
-
+# Функция для спавна игрока с проверкой столкновения с укрытиями
 def random_player_spawn():
     while True:
         x = random.randint(50, WIDTH - 50)
         y = random.randint(50, HEIGHT - 50)
         rect_check = pygame.Rect(x - 20, y - 20, 40, 40)
-        collided = False
-        for c in level_covers:
-            cx, cy, cw, ch = c
-            rect_c = pygame.Rect(cx, cy, cw, ch)
-            if rect_check.colliderect(rect_c):
-                collided = True
+        collision = False
+        for cov in level_covers:
+            cx, cy, cw, ch = cov
+            rect_cov = pygame.Rect(cx, cy, cw, ch)
+            if rect_check.colliderect(rect_cov):
+                collision = True
                 break
-        if not collided:
+        if not collision:
             return x, y
 
 
-def random_mine_spawn():
-    while True:
-        x = random.randint(50, WIDTH - 50)
-        y = random.randint(50, HEIGHT - 50)
-        rect_check = pygame.Rect(x - 8, y - 8, 16, 16)
-        collided = False
-        for c in level_covers:
-            cx, cy, cw, ch = c
-            rect_c = pygame.Rect(cx, cy, cw, ch)
-            if rect_check.colliderect(rect_c):
-                collided = True
-                break
-        if not collided:
-            return x, y
-
-
+# Функция создания уровня: сначала генерируются укрытия, затем спавнятся враги с проверкой столкновений с текстурами
 def create_level_data(lv):
     global level_enemies, level_snipers, level_boss, level_covers, level_hostages, level_bombs, level_items, wave_enemies, boss_health, boss_max_health
+    # Сброс данных уровня
     level_enemies = []
     level_snipers = []
     level_boss = []
-    level_covers = []
     level_hostages = []
     level_bombs = []
     level_items = []
     wave_enemies = 0
-    scale = difficulty_scale(lv)
+
+    # Сначала генерируем укрытия (баррикады)
+    level_covers = []
+    cover_count = 5
+    for i in range(cover_count):
+        while True:
+            cx = random.randint(0, cols - 2)
+            cy = random.randint(0, rows - 2)
+            cw = random.randint(1, 2)
+            ch = random.randint(1, 2)
+            px = cx * tile_size
+            py = cy * tile_size
+            w = cw * tile_size
+            h = ch * tile_size
+            rect_cover = pygame.Rect(px, py, w, h)
+            collision = False
+            # Проверяем, чтобы укрытия не накладывались друг на друга
+            for cov in level_covers:
+                cvx, cvy, cvw, cvh = cov
+                rect_cov = pygame.Rect(cvx, cvy, cvw, cvh)
+                if rect_cover.colliderect(rect_cov):
+                    collision = True
+                    break
+            if not collision:
+                level_covers.append([px, py, w, h])
+                break
+
+    # Локальная функция для спавна врагов с проверкой столкновения с укрытиями
+    def spawn_enemy_avoiding_cover():
+        while True:
+            x = random.randint(50, WIDTH - 50)
+            y = random.randint(50, HEIGHT - 50)
+            rect_check = pygame.Rect(x - 12, y - 12, 24, 24)
+            collision = False
+            for cov in level_covers:
+                cx, cy, cw, ch = cov
+                rect_cov = pygame.Rect(cx, cy, cw, ch)
+                if rect_check.colliderect(rect_cov):
+                    collision = True
+                    break
+            if not collision:
+                return x, y
+
+    sc = difficulty_scale(lv)
     if lv < 20:
         enemy_count = min(lv + 3, 15)
         sniper_count = lv // 4
         for i in range(enemy_count):
-            ex, ey = random_enemy_spawn()
-            e_health = int(100 * scale)
-            level_enemies.append([ex, ey, e_health, [], 0, random.randint(0, int(ENEMY_FIRE_RATE_BASE / scale))])
+            ex, ey = spawn_enemy_avoiding_cover()
+            eh = int(100 * sc)
+            level_enemies.append([ex, ey, eh, [], 0, random.randint(0, int(ENEMY_FIRE_RATE_BASE / sc))])
         for i in range(sniper_count):
-            sx, sy = random_enemy_spawn()
-            s_health = int(80 * scale)
-            level_snipers.append([sx, sy, s_health, [], 0, random.randint(0, int(SNIPER_FIRE_RATE_BASE / scale))])
-        cover_count = 5
-        for i in range(cover_count):
-            cx = random.randint(0, cols - 2)
-            cy = random.randint(0, rows - 2)
-            cw = random.randint(1, 2)
-            ch = random.randint(1, 2)
-            px = cx * tile_size
-            py = cy * tile_size
-            w = cw * tile_size
-            h = ch * tile_size
-            level_covers.append([px, py, w, h])
+            sx, sy = spawn_enemy_avoiding_cover()
+            sh = int(80 * sc)
+            level_snipers.append([sx, sy, sh, [], 0, random.randint(0, int(SNIPER_FIRE_RATE_BASE / sc))])
         hostage_count = 1 if lv % 2 == 0 else 0
         for i in range(hostage_count):
-            hx, hy = random_enemy_spawn()
+            hx, hy = spawn_enemy_avoiding_cover()
             level_hostages.append([hx, hy, True])
         bomb_count = 1 if lv % 3 == 0 else 0
         for i in range(bomb_count):
-            bx, by = random_enemy_spawn()
+            bx, by = spawn_enemy_avoiding_cover()
             level_bombs.append([bx, by, 300])
         item_count = 2
         for i in range(item_count):
-            ix, iy = random_enemy_spawn()
-            # Редкий шанс spawна "extra_life"
+            ix, iy = spawn_enemy_avoiding_cover()
             itype = random.choice(["health", "ammo", "armor", "none", "none", "none"])
-            # например, 1 из 6 вариантов - можно менять по вкусу
             if itype == "none":
                 continue
             level_items.append([ix, iy, itype])
     else:
-        boss_health = int(300 * scale)
-        boss_max_health = int(300 * scale)
-        bx, by = random_enemy_spawn()
-        level_boss.append([bx, by, boss_health, [], 0, random.randint(0, int(BOSS_FIRE_RATE_BASE / scale))])
-        cover_count = 5
-        for i in range(cover_count):
-            cx = random.randint(0, cols - 2)
-            cy = random.randint(0, rows - 2)
-            cw = random.randint(1, 2)
-            ch = random.randint(1, 2)
-            px = cx * tile_size
-            py = cy * tile_size
-            w = cw * tile_size
-            h = ch * tile_size
-            level_covers.append([px, py, w, h])
+        boss_health = int(300 * sc)
+        boss_max_health = int(300 * sc)
+        bx, by = spawn_enemy_avoiding_cover()
+        level_boss.append([bx, by, boss_health, [], 0, random.randint(0, int(BOSS_FIRE_RATE_BASE / sc))])
         item_count = 4
         for i in range(item_count):
-            ix, iy = random_enemy_spawn()
+            ix, iy = spawn_enemy_avoiding_cover()
             itype = random.choice(["health", "ammo", "armor", "none"])
             if itype == "none":
                 continue
@@ -415,9 +450,7 @@ def fill_grid_passable():
 
 
 def get_grid_pos(x, y):
-    gx = int(x // tile_size)
-    gy = int(y // tile_size)
-    return gx, gy
+    return int(x // tile_size), int(y // tile_size)
 
 
 def get_pixel_center(gx, gy):
@@ -443,7 +476,7 @@ def bfs_pathfind(startx, starty, endgx, endgy):
     if not grid_passable[sy][sx]: return []
     if not grid_passable[endgy][endgx]: return []
     visited = [[False for _ in range(cols)] for _ in range(rows)]
-    parent = dict()
+    parent = {}
     q = deque()
     q.append((sx, sy))
     visited[sy][sx] = True
@@ -466,7 +499,6 @@ def bfs_pathfind(startx, starty, endgx, endgy):
         path.append(cur)
         cur = parent[cur]
     path.append((sx, sy))
-
     path.reverse()
     return path
 
@@ -551,13 +583,18 @@ def move_player():
 
 
 def shoot_bullet():
-    global shots_fired, ammo
+    global shots_fired, ammo, shoot_cooldown
+    if shoot_cooldown > 0: return
     if ammo > 0 and reload_time <= 0:
+        shoot_sound.play()
         mx, my = pygame.mouse.get_pos()
         angle = math.atan2(my - player_y, mx - player_x)
         speed = 10
         shots_fired.append([player_x, player_y, angle, speed])
         ammo -= 1
+        shoot_cooldown = shoot_cooldown_max
+    else:
+        release_sound.play()
 
 
 def enemy_shoot(ex, ey):
@@ -580,6 +617,8 @@ def boss_shoot(bx, by):
 
 def explode(entity_x, entity_y, rad, damage):
     global player_x, player_y, explosions
+    if damage == 70:
+        explosion_sound.play()
     explosions.append([entity_x, entity_y, rad, explosion_time])
     dist = math.hypot(entity_x - player_x, entity_y - player_y)
     if dist < rad:
@@ -605,11 +644,12 @@ def update_bullets():
                 break
         if mine_hit:
             mines.remove(mine_hit)
-            explode(mine_hit[0], mine_hit[1], mine_explosion_radius, 30)
+            explode(mine_hit[0], mine_hit[1], mine_explosion_radius, 70)
             continue
         hit = False
         for e in level_enemies:
-            if math.hypot(bx - e[0], by - e[1]) < 10:
+            dist_e = math.hypot(bx - e[0], by - e[1])
+            if dist_e < 10:
                 e[2] -= 40
                 if e[2] <= 0:
                     score += 10
@@ -619,7 +659,8 @@ def update_bullets():
                 break
         if hit: continue
         for s in level_snipers:
-            if math.hypot(bx - s[0], by - s[1]) < 10:
+            dist_s = math.hypot(bx - s[0], by - s[1])
+            if dist_s < 10:
                 s[2] -= 50
                 if s[2] <= 0:
                     score += 15
@@ -640,8 +681,19 @@ def update_bullets():
                     hit = True
                     break
         if hit: continue
+        for h in level_hostages:
+            hx, hy, alive = h
+            if alive:
+                if math.hypot(bx - hx, by - hy) < 10:
+                    h[2] = False
+                    game_over_screen_trigger()
+                    explode(bx, by, explosion_radius, 0)
+                    hit = True
+                    break
+        if hit: continue
         new_player_bullets.append([bx, by, ang, spd])
     shots_fired = new_player_bullets
+
     new_enemy_bullets = []
     for eb in enemy_shots:
         bx, by, ang, spd = eb
@@ -659,14 +711,23 @@ def update_bullets():
                 break
         if mine_hit:
             mines.remove(mine_hit)
-            explode(mine_hit[0], mine_hit[1], mine_explosion_radius, 30)
+            explode(mine_hit[0], mine_hit[1], mine_explosion_radius, 50)
             continue
-        dist = math.hypot(bx - player_x, by - player_y)
-        if dist < 10:
+        dist_p = math.hypot(bx - player_x, by - player_y)
+        if dist_p < 10:
             explode(bx, by, explosion_radius, 10)
             continue
+        for h in level_hostages:
+            hx, hy, alive = h
+            if alive:
+                if math.hypot(bx - hx, by - hy) < 10:
+                    h[2] = False
+                    game_over_screen_trigger()
+                    explode(bx, by, explosion_radius, 0)
+                    break
         new_enemy_bullets.append([bx, by, ang, spd])
     enemy_shots = new_enemy_bullets
+
     new_sniper_bullets = []
     for sb in sniper_shots:
         bx, by, ang, spd = sb
@@ -684,14 +745,23 @@ def update_bullets():
                 break
         if mine_hit:
             mines.remove(mine_hit)
-            explode(mine_hit[0], mine_hit[1], mine_explosion_radius, 30)
+            explode(mine_hit[0], mine_hit[1], mine_explosion_radius, 50)
             continue
-        dist = math.hypot(bx - player_x, by - player_y)
-        if dist < 10:
+        dist_p = math.hypot(bx - player_x, by - player_y)
+        if dist_p < 10:
             explode(bx, by, explosion_radius, 15)
             continue
+        for h in level_hostages:
+            hx, hy, alive = h
+            if alive:
+                if math.hypot(bx - hx, by - hy) < 10:
+                    h[2] = False
+                    game_over_screen_trigger()
+                    explode(bx, by, explosion_radius, 0)
+                    break
         new_sniper_bullets.append([bx, by, ang, spd])
     sniper_shots = new_sniper_bullets
+
     new_boss_bullets = []
     for bb in boss_shots:
         bx, by, ang, spd = bb
@@ -709,14 +779,29 @@ def update_bullets():
                 break
         if mine_hit:
             mines.remove(mine_hit)
-            explode(mine_hit[0], mine_hit[1], mine_explosion_radius, 30)
+            explode(mine_hit[0], mine_hit[1], mine_explosion_radius, 50)
             continue
-        dist = math.hypot(bx - player_x, by - player_y)
-        if dist < 15:
+        dist_p = math.hypot(bx - player_x, by - player_y)
+        if dist_p < 15:
             explode(bx, by, explosion_radius, 20)
             continue
+        for h in level_hostages:
+            hx, hy, alive = h
+            if alive:
+                if math.hypot(bx - hx, by - hy) < 10:
+                    h[2] = False
+                    game_over_screen_trigger()
+                    explode(bx, by, explosion_radius, 0)
+                    break
         new_boss_bullets.append([bx, by, ang, spd])
     boss_shots = new_boss_bullets
+
+
+def game_over_screen_trigger():
+    global game_over, return_to_menu, show_game_over
+    game_over = True
+    return_to_menu = True
+    show_game_over = True
 
 
 def update_explosions():
@@ -886,7 +971,6 @@ def check_player_dead():
     if player_health <= 0:
         if player_extra_lives > 0:
             player_extra_lives -= 1
-            # Возрождаемся, допустим с половиной здоровья
             player_health = player_max_health // 2
             return
         game_over = True
@@ -915,8 +999,13 @@ def draw_boss():
 
 
 def draw_covers():
+    global cover_texture
+    if cover_texture is None:
+        load_cover_texture()
     for c in level_covers:
-        pygame.draw.rect(screen, COVER_COLOR, pygame.Rect(c[0], c[1], c[2], c[3]))
+        px, py, w, h = c
+        scaled = pygame.transform.scale(cover_texture, (w, h))
+        screen.blit(scaled, (px, py))
 
 
 def draw_hostages():
@@ -934,24 +1023,22 @@ def draw_bombs():
 def draw_items():
     for it in level_items:
         ix, iy, itype = it
-        if itype=="extra_life":
-            pygame.draw.circle(screen, (0, 0, 255), (ix, iy), 5)
-        elif itype == "health":
-            texture_rect = bandage_texture.get_rect(center=(ix, iy))
-            screen.blit(bandage_texture, texture_rect)
+        if itype == "health":
+            rect_img = health_texture.get_rect(center=(ix, iy))
+            screen.blit(health_texture, rect_img)
         elif itype == "ammo":
-            texture_rect = ammo_texture.get_rect(center=(ix, iy))
-            screen.blit(bullets_texture, texture_rect)
+            rect_img = ammo_texture.get_rect(center=(ix, iy))
+            screen.blit(ammo_texture, rect_img)
         elif itype == "armor":
-            texture_rect = ammo_texture.get_rect(center=(ix, iy))
-            screen.blit(armor_texture, texture_rect)
+            rect_img = armor_texture.get_rect(center=(ix, iy))
+            screen.blit(armor_texture, rect_img)
 
 
 def draw_mines():
     for m in mines:
         mx, my = m
-        texture_rect = mine_texture.get_rect(center=(mx, my))
-        screen.blit(mine_texture, texture_rect)
+        rect_img = mine_texture.get_rect(center=(mx, my))
+        screen.blit(mine_texture, rect_img)
 
 
 def draw_bullet_lists():
@@ -1013,14 +1100,6 @@ def update_items():
             elif itype == "armor":
                 player_armor += 20
                 if player_armor > player_max_armor: player_armor = player_max_armor
-            # Допустим, очень редкий шанс "extra_life" появился
-            # Но для примера решили что "extra_life" = "health", "ammo", "armor" ?
-            # Можно сделать отдельный тип.
-            # Или же просто "health" = green circle, "ammo" = yellow circle, "armor" = blue circle.
-            # Допустим, "extra_life" = "life" - тогда:
-            # if itype=="life": player_extra_lives += 1
-            # Но сейчас у нас itype=="health"/"ammo"/"armor".
-            # Дополним:
         else:
             new_items.append(it)
     level_items = new_items
@@ -1033,17 +1112,14 @@ def draw_bars():
     if player_max_armor > 0: armor_ratio = player_armor / player_max_armor
     pygame.draw.rect(screen, RED, (10, 10, int(health_bar_w * health_ratio), 10))
     pygame.draw.rect(screen, (0, 0, 150), (10, 25, int(health_bar_w * armor_ratio), 10))
-    draw_text("HP:" + str(player_health), 10, 40)
-    draw_text("AHP:" + str(player_armor), 10, 60)
-    draw_text("Ammo:" + str(ammo), 10, 80)
-    draw_text("Счет:" + str(score), 10, 100)
-    draw_text("Уровень:" + str(current_level), 10, 120)
-    # Показать кол-во жизней
-    draw_text("Жизни:" + str(player_extra_lives), 10, 140)
+    draw_text("Здоровье: " + str(player_health), 10, 40, WHITE)
+    draw_text("Броня: " + str(player_armor), 10, 60, WHITE)
+    draw_text("Патроны: " + str(ammo), 10, 80, WHITE)
+    draw_text("Счёт: " + str(score), 10, 100, WHITE)
+    draw_text("Уровень: " + str(current_level), 10, 120, WHITE)
+    draw_text("Жизни: " + str(player_extra_lives), 10, 140, WHITE)
     if reload_time > 0:
-        draw_text("Перезарядка...", 10, 160)
-        reload_effect = pygame.mixer.Sound("sounds/reload.wav")
-        reload_effect.play()
+        draw_text("Перезарядка...", 10, 160, WHITE)
 
 
 def draw_bomb_timers():
@@ -1099,7 +1175,7 @@ def update_wave():
                 wave_timer = 0
                 wave_enemies = random.randint(1, 3)
                 for i in range(wave_enemies):
-                    ex, ey = random_enemy_spawn()
+                    ex, ey = random.randint(50, WIDTH - 50), random.randint(50, HEIGHT - 50)
                     e_health = int(100 * difficulty_scale(current_level))
                     level_enemies.append([ex, ey, e_health, [], 0, random.randint(0,
                                                                                   int(ENEMY_FIRE_RATE_BASE / difficulty_scale(
@@ -1117,25 +1193,32 @@ def update_mines():
     if mine_spawn_timer >= interval:
         mine_spawn_timer = 0
         if random.random() < 0.5:
-            mx, my = random_mine_spawn()
+            mx, my = random.randint(50, WIDTH - 50), random.randint(50, HEIGHT - 50)
             mines.append([mx, my])
 
 
 def draw_menu():
-    screen.fill(BG_COLOR)
-    draw_text("City Defense", title_rect.x, title_rect.y, WHITE)
-    draw_text("Выберите класс:", choose_class_rect.x, choose_class_rect.y, WHITE)
+    screen.fill((20, 20, 40))
+    shadow_color = (0, 0, 0)
+    title_text = "Городская Оборона"
+    shadow = FONT.render(title_text, True, shadow_color)
+    title_surface = FONT.render(title_text, True, WHITE)
+    screen.blit(shadow, (title_rect.x + 3, title_rect.y + 3))
+    screen.blit(title_surface, (title_rect.x, title_rect.y))
+    prompt_text = "Выберите класс героя:"
+    prompt_surface = FONT.render(prompt_text, True, WHITE)
+    screen.blit(prompt_surface, (WIDTH // 2 - prompt_surface.get_width() // 2, title_rect.y + title_rect.height + 10))
     pygame.draw.rect(screen, sniper_button_color, sniper_button_rect)
     pygame.draw.rect(screen, tank_button_color, tank_button_rect)
     pygame.draw.rect(screen, engineer_button_color, engineer_button_rect)
     pygame.draw.rect(screen, start_button_color, start_button_rect)
     pygame.draw.rect(screen, exit_button_color, exit_button_rect)
-    draw_text("Снайпер", sniper_button_rect.x + 5, sniper_button_rect.y + 10, BLACK)
-    draw_text("Танк", tank_button_rect.x + 15, tank_button_rect.y + 10, BLACK)
-    draw_text("Инжинер", engineer_button_rect.x + 15, engineer_button_rect.y + 10, BLACK)
-    draw_text("Начать", start_button_rect.x + 5, start_button_rect.y + 10, BLACK)
-    draw_text("Выйти", exit_button_rect.x + 30, exit_button_rect.y + 10, BLACK)
-    draw_text("Current class: " + selected_class, current_class_rect.x, current_class_rect.y, WHITE)
+    draw_text("Снайпер", sniper_button_rect.x + 20, sniper_button_rect.y + 15, BLACK)
+    draw_text("Тяжёлый", tank_button_rect.x + 20, tank_button_rect.y + 15, BLACK)
+    draw_text("Инженер", engineer_button_rect.x + 20, engineer_button_rect.y + 15, BLACK)
+    draw_text("Начать игру", start_button_rect.x + 5, start_button_rect.y + 15, BLACK)
+    draw_text("Выход", exit_button_rect.x + 25, exit_button_rect.y + 15, BLACK)
+    draw_text("Текущий класс: " + selected_class, current_class_rect.x, current_class_rect.y, WHITE)
     pygame.display.flip()
 
 
@@ -1158,11 +1241,11 @@ def draw_mission_accomplished():
 def pause_screen():
     screen.fill(BLACK)
     big_font = pygame.font.SysFont("Arial", 50, bold=True)
-    txt = "PAUSE"
+    txt = "ПАУЗА"
     ts = big_font.render(txt, True, WHITE)
     screen.blit(ts, (WIDTH // 2 - ts.get_width() // 2, HEIGHT // 2 - 70))
     small_text1 = "Нажмите ESC, чтобы продолжить"
-    small_text2 = "Нажмите R, чтобы вернуться в меню"
+    small_text2 = "Нажмите R, чтобы выйти в меню"
     st1 = FONT.render(small_text1, True, WHITE)
     st2 = FONT.render(small_text2, True, WHITE)
     screen.blit(st1, (WIDTH // 2 - st1.get_width() // 2, HEIGHT // 2))
@@ -1172,19 +1255,23 @@ def pause_screen():
 def game_over_screen():
     screen.fill(BLACK)
     big_font = pygame.font.SysFont("Arial", 50, bold=True)
-    txt = "GAME OVER"
+    txt = "ИГРА ОКОНЧЕНА"
     ts = big_font.render(txt, True, RED)
     screen.blit(ts, (WIDTH // 2 - ts.get_width() // 2, HEIGHT // 2 - 70))
-    small_text1 = "Нажмите R, чтобы вернуться в меню"
-    small_text2 = "Нажмите ESC, чтобы выйти"
-    st1 = FONT.render(small_text1, True, WHITE)
-    st2 = FONT.render(small_text2, True, WHITE)
-    screen.blit(st1, (WIDTH // 2 - st1.get_width() // 2, HEIGHT // 2))
-    screen.blit(st2, (WIDTH // 2 - st2.get_width() // 2, HEIGHT // 2 + 30))
+
+    timer = threading.Timer(3.0, timer_go)
+    timer.start()
 
 
+def timer_go():
+    pygame.quit()  # Закрываем pygame
+    sys.exit()  # Закрываем программу
+
+
+# --- Главный игровой цикл ---
 def main_loop():
-    global current_level, level_complete, game_over, boss_defeated, sniper_spot_cooldown, damage_cooldown, menu_active, selected_class, show_level_title, level_title_timer, show_mission_accomplished, mission_accomplished_timer, return_to_menu, paused, show_game_over
+    global current_level, level_complete, game_over, boss_defeated, sniper_spot_cooldown, damage_cooldown, menu_active, selected_class, show_level_title, level_title_timer, show_mission_accomplished, mission_accomplished_timer, return_to_menu, paused, show_game_over, shoot_cooldown, restart_game
+    load_cover_texture()
     while menu_active:
         handle_input_events()
         draw_menu()
@@ -1193,6 +1280,11 @@ def main_loop():
     start_level(current_level)
     while True:
         handle_input_events()
+        # Если из режима паузы нажали R для возврата в меню, завершаем игровой цикл
+        if restart_game:
+            game_over_screen_reset()
+            main_loop()  # Перезапуск главного цикла (возврат в главное меню)
+            return
         if show_game_over:
             game_over_screen()
             pygame.display.flip()
@@ -1238,6 +1330,7 @@ def main_loop():
             update_mines()
             if sniper_spot_cooldown > 0: sniper_spot_cooldown -= 1
             if damage_cooldown > 0: damage_cooldown -= 1
+            if shoot_cooldown > 0: shoot_cooldown -= 1
             check_player_dead()
             check_level_complete()
         screen.fill(BG_COLOR)
@@ -1261,4 +1354,5 @@ def main_loop():
         clock.tick(60)
 
 
-main_loop()
+if __name__ == "__main__":
+    main_loop()
