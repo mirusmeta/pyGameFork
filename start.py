@@ -27,11 +27,10 @@ reload_sound = pygame.mixer.Sound("sounds/reload.wav")
 release_sound = pygame.mixer.Sound("sounds/release.mp3")
 explosion_sound = pygame.mixer.Sound("sounds/explosion.wav")
 
-
 WIDTH = 800
 HEIGHT = 600
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("TopDownCityDefense - Updated Version")
+pygame.display.set_caption("Городской бой")
 FONT = pygame.font.SysFont("Arial", 20)
 
 # Цвета и константы
@@ -106,7 +105,7 @@ rows = HEIGHT // tile_size
 grid_passable = [[True for _ in range(cols)] for _ in range(rows)]
 
 mines = []
-mine_explosion_radius = 50  #радиус взрыва мины
+mine_explosion_radius = 50  # радиус взрыва мины
 mine_explosion_time = 30
 mine_spawn_timer = 0
 mine_spawn_interval = 600
